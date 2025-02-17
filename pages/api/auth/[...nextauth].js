@@ -1,27 +1,27 @@
-import NextAuth from 'next-auth';
-import CredentialsProvider from 'next-auth/providers/credentials';
+import NextAuth from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
 
 export default NextAuth({
     providers: [
         CredentialsProvider({
+            name: "Credentials",
             credentials: {
-                username: { label: 'Username', type: 'text' },
-                password: { label: 'Password', type: 'password' },
+                email: { label: "Email", type: "email" },
+                password: { label: "Password", type: "password" }
             },
-            authorize: async (credentials) => {
-                const user = { id: 1, name: 'User', role: 'editor' }; // Authenticate via DB
-                return user || null;
-            },
-        }),
+            async authorize(credentials) {
+                if (credentials.email === "user@example.com" && credentials.password === "password") {
+                    return { id: "1", name: "User", email: credentials.email };
+                }
+                return null;
+            }
+        })
     ],
-    session: {
-        strategy: 'jwt',
-    },
+    secret: process.env.NEXTAUTH_SECRET,
     callbacks: {
-        async session(session, user) {
-            session.user.id = user.id;
-            session.user.role = user.role;
+        async session({ session, token }) {
+            session.user.id = token.sub;
             return session;
-        },
-    },
+        }
+    }
 });

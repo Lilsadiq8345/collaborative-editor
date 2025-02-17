@@ -1,31 +1,34 @@
 import { Server } from 'socket.io';
-import { MongoClient } from 'mongodb';
+import { connectToMongo } from '../../lib/mongodb';
 import { getSession } from 'next-auth/react';
 
 let io;
+let changeStream;
 
-const connectToMongo = async () => {
-    const client = new MongoClient(process.env.MONGO_URI);
-    await client.connect();
-    return client.db();
-};
+export default async function handler(req, res) {
+    if (!res.socket.server.io) {
+        io = new Server(res.socket.server);
+        res.socket.server.io = io;
 
-export const config = {
-    api: {
-        bodyParser: false,
-        externalResolver: true,
-    },
-};
+        // Connect to MongoDB
+        const db = await connectToMongo();
+        const collection = db.collection("documents");
 
-export default async (req, res) => {
-    if (!io) {
-        const server = res.socket.server;
-        io = new Server(server);
+        // Watch for changes in MongoDB
+        changeStream = collection.watch();
+        changeStream.on('change', (change) => {
+            io.emit('document-change', change.fullDocument);
+        });
 
         io.on('connection', (socket) => {
             console.log('A user connected');
 
-            // Listen for document edit requests
+            socket.on('join-document', async (docId) => {
+                socket.join(docId);
+                const document = await collection.findOne({ _id: docId });
+                socket.emit('load-document', document?.content || '');
+            });
+
             socket.on('edit-document', async (docId, content) => {
                 const session = await getSession({ req });
                 if (!session) {
@@ -33,16 +36,15 @@ export default async (req, res) => {
                     return;
                 }
 
-                // Connect to MongoDB and update the document
-                const db = await connectToMongo();
-                const collection = db.collection('documents');
                 await collection.updateOne({ _id: docId }, { $set: { content } });
+                io.to(docId).emit('document-change', content);
+            });
 
-                // Broadcast the updated content to other users
-                io.emit('document-change', content);
+            socket.on('disconnect', () => {
+                console.log('User disconnected');
             });
         });
     }
 
-    return res.status(200).json({ message: 'Socket.IO Server is running' });
-};
+    res.end();
+}
